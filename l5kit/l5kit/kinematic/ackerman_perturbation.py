@@ -61,13 +61,14 @@ class AckermanPerturbation(Perturbation):
         if np.random.rand() >= self.perturb_prob:
             return history_frames.copy(), future_frames.copy()
 
-        lateral_offset_m, longitudinal_offset_m, yaw_offset_rad = self.random_offset_generator()
+        lateral_offset_m, longitudinal_offset_m, yaw_offset_rad, speed_multiplier = self.random_offset_generator()
         position_offset_m = np.array([longitudinal_offset_m, lateral_offset_m, 0])
+        speed_multiplier = max(0.5, min(speed_multiplier, 1.5))
 
         num_history_frames = len(history_frames)
         num_future_frames = len(future_frames)
         total_num_frames = num_history_frames + num_future_frames
-        if total_num_frames < 2:  # TODO is this an error?
+        if total_num_frames < 2 or num_future_frames < 1:  # TODO is this an error?
             #  we need at least 2 frames to compute speed and steering rate.
             return history_frames.copy(), future_frames.copy()
 
@@ -82,17 +83,22 @@ class AckermanPerturbation(Perturbation):
         gr = trajectory[curr_frame_idx + 1:, 2]
         gv = _compute_speed(trajectory[curr_frame_idx:, :2])
 
+        #print(total_num_frames, num_future_frames, curr_frame_idx, gv.size)
+        if np.abs(gv[0]) < NUMERICAL_THRESHOLD:  # Agent is standing, perturbations don't work as intended.
+            return history_frames.copy(), future_frames.copy()
+
         x0 = trajectory[curr_frame_idx, 0] + position_offset_m[0]
         y0 = trajectory[curr_frame_idx, 1] + position_offset_m[1]
         r0 = trajectory[curr_frame_idx, 2] + yaw_offset_rad
-        v0 = gv[0]
+        v0 = gv[0] * speed_multiplier
 
         wgx = np.ones(num_future_frames)
         wgx[-1] = 10
         wgy = np.ones(num_future_frames)
         wgy[-1] = 10
         wgr = np.zeros(num_future_frames)
-        wgv = np.zeros(num_future_frames)
+        wgv = np.ones(num_future_frames)
+        wgv[-1] = 10
 
         new_xs, new_ys, new_yaws, new_vs, new_acc, new_steer = fit_ackerman_model_exact(
             x0, y0, r0, v0, gx, gy, gr, gv, wgx, wgy, wgr, wgv,
