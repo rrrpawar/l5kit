@@ -10,7 +10,8 @@ from .perturbation import Perturbation
 
 
 #  if the offset or norm val is below this, we don't apply perturbation.
-NUMERICAL_THRESHOLD = 1e-5
+# [km / h]
+NUMERICAL_THRESHOLD = 5
 
 
 def _get_trajectory(
@@ -61,23 +62,24 @@ class AckermanPerturbation(Perturbation):
             return history_frames.copy(), future_frames.copy()
 
         lateral_offset_m, longitudinal_offset_m, yaw_offset_rad = self.random_offset_generator()
-        position_offset_m = np.array([longitudinal_offset_m, lateral_offset_m, 0])
 
         num_history_frames = len(history_frames)
         num_future_frames = len(future_frames)
-        total_num_frames = num_history_frames + num_future_frames
-        if total_num_frames < 2:  # TODO is this an error?
-            #  we need at least 2 frames to compute speed and steering rate.
-            return history_frames.copy(), future_frames.copy()
+
+        assert num_history_frames > 0, f"Number of history frames: {num_history_frames}"
+        assert num_future_frames > 0, f"Number of future frames: {num_future_frames}"
 
         trajectory = _get_trajectory(history_frames, future_frames)
         speeds = _compute_speed(trajectory[:, :2])
 
         # TODO: ackerman perturbation does not work when EGO is static
-        if np.sum(speeds) < NUMERICAL_THRESHOLD:
-            return history_frames.copy(), future_frames.copy()
+        if np.sum(speeds) < (NUMERICAL_THRESHOLD / 3):
+            # return history_frames.copy(), future_frames.copy()
+            lateral_offset_m = 0
+            yaw_offset_rad = 0
 
         curr_frame_idx = num_history_frames - 1
+        position_offset_m = np.array([longitudinal_offset_m, lateral_offset_m, 0])
         position_offset_m = np.matmul(yaw_as_rotation33(trajectory[curr_frame_idx, 2]) , position_offset_m)
 
         #  perform ackerman steering model fitting
@@ -92,11 +94,8 @@ class AckermanPerturbation(Perturbation):
         v0 = gv[0]
 
         wgx = np.ones(num_future_frames)
-        wgx[-1] = 5
         wgy = np.ones(num_future_frames)
-        wgy[-1] = 5
-        wgr = np.zeros(num_future_frames)
-        wgr[-1] = 5
+        wgr = np.ones(num_future_frames)
         wgv = np.zeros(num_future_frames)
 
         new_xs, new_ys, new_yaws, new_vs, new_acc, new_steer = fit_ackerman_model_exact(
